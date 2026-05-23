@@ -1,0 +1,47 @@
+#!/bin/sh
+
+set -eu
+
+message_file=$1
+header=$(
+  sed -n '/^[[:space:]]*#/d; /^[[:space:]]*$/d; 1p' "$message_file" \
+    | tr -d '\r'
+)
+
+if [ -z "$header" ]; then
+  exit 0
+fi
+
+case "$header" in
+  Merge\ *|Revert\ *|fixup!\ *|squash!\ *)
+    exit 0
+    ;;
+esac
+
+pattern='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9][a-z0-9._/-]*\))?(!)?: [^ ].+$'
+
+if ! printf '%s' "$header" | grep -Eq "$pattern"; then
+  cat <<'EOF' >&2
+Invalid commit message header.
+
+Expected:
+  <type>(<scope>): <subject>
+
+Examples:
+  feat(chat): add inspect fallback output
+  fix(state): handle missing storage.json
+  docs(readme): clarify install steps
+
+Allowed types:
+  feat fix docs style refactor perf test build ci chore revert
+EOF
+  exit 1
+fi
+
+header_length=$(printf '%s' "$header" | awk '{ print length }')
+if [ "$header_length" -gt 72 ]; then
+  printf '%s\n' \
+    "Commit header is too long ($header_length > 72):" \
+    "  $header" >&2
+  exit 1
+fi

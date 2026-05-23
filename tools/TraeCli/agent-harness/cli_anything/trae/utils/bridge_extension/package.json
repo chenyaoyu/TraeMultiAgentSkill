@@ -1,0 +1,32 @@
+{
+  "name": "headless-bridge",
+  "displayName": "Trae CLI Headless Bridge",
+  "description": "Local bridge for driving internal Trae commands from an external CLI harness.",
+  "version": "0.1.1",
+  "publisher": "traecli",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.70.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "*",
+    "onStartupFinished",
+    "onCommand:traecli.headlessBridge.showStatus"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "traecli.headlessBridge.showStatus",
+        "title": "Trae CLI Headless: Show Status",
+        "category": "Trae CLI"
+      }
+    ]
+  }
+}
