@@ -1,12 +1,23 @@
 ---
 name: multi-agent-team
 slug: multi-agent-team
-description: 基于任务类型动态调度到合适的智能体角色（架构师、产品经理、测试专家、独立开发者、UI 设计师）。支持多智能体协作、共识机制、完整项目生命周期管理、规范驱动开发、代码走读审查和项目理解能力。支持中英文双语。v2.4 新增 Karpathy 四大核心原则，v2.5 新增 Cybernetics 工程控制论增强。
+description: 基于任务类型动态调度到合适的智能体角色（架构师、产品经理、测试专家、独立开发者、UI 设计师）。支持多智能体协作、共识机制、完整项目生命周期管理、规范驱动开发、代码走读审查和项目理解能力。支持中英文双语。v2.4 新增 Karpathy 四大核心原则，v2.5 新增 Cybernetics 工程控制论增强，v2.6 新增通用 Task Tool + TraeCli 并行子智能体调度。
 ---
 
 # Multi-Agent Team Dispatcher (AI-Enhanced)
 
 基于任务类型和上下文，自动调度到最合适的智能体角色（架构师、产品经理、测试专家、Solo Coder、UI 设计师）。
+
+**v2.6 新增（通用 Task Tool + TraeCli 并行子智能体调度）**:
+> 核心脚本: `scripts/trae_task_tool.py`, `scripts/trae_agent_worker.py`, `scripts/traecli_adapter.py`, `scripts/traecli_setup.py`
+> 详细文档: `docs/guides/TASK_TOOL_GUIDE.md`, `docs/guides/TRAECLI_ADAPTER_GUIDE.md`, `docs/guides/TRAECLI_SETUP_GUIDE.md`
+> 角色规则: `docs/roles/dispatcher/DISPATCHER_RULES.md`
+> - 🔧 通用 Task Tool: 双后端（Worker + TraeCli），可插拔 TaskHandler，自动后端选择
+> - 🚀 TraeCli 集成: 通过 `traecli exec` 启动独立 AI 会话并行执行子任务
+> - 📦 可插拔 Handler: traecli / local-lua2cs / shell，支持自定义扩展
+> - ⚡ 并行调度: 多个子智能体同时运行，互不阻塞
+> - 📋 Dispatcher 角色: 新增子智能体调度员角色规则和执行模板
+> - 🔍 自动环境检测: TraeCli 缺失时自动安装，安装失败自动降级到 worker 后端
 
 **v2.5 新增（Cybernetics 工程控制论增强）**:
 > 参考来源：https://github.com/Jiaqi-Guo-0114/cybernetics-agent  
@@ -225,6 +236,33 @@ AI (English): "📋 Task received, starting analysis..."
 9. **规范驱动开发**: 基于项目规范和文档进行开发
 10. **七阶段标准工作流程**: 需求分析→架构设计→测试设计→任务分解→开发实现→测试验证→发布评审
 11. **UI 设计**: 创建独特、生产级的 UI 界面，避免通用的 AI "slop" 美学
+
+### 并行子智能体调度 (v2.6 新增)
+
+通过通用 Task Tool 和 TraeCli 适配器，支持将任务分派给独立子智能体并行执行：
+
+```python
+from trae_task_tool import TraeTaskTool
+
+tool = TraeTaskTool(backend="traecli")
+
+# 并行分派多个子智能体
+task_ids = tool.dispatch_agents([
+    {"agent_type": "solo-coder", "description": "重构 Team 模块"},
+    {"agent_type": "solo-coder", "description": "重构 Friend 模块"},
+    {"agent_type": "architect",  "description": "设计聊天系统架构"},
+])
+
+results = tool.wait_for_all(task_ids)
+```
+
+**双后端架构**:
+- **Worker 后端**: Python 子进程 + 可插拔 TaskHandler（traecli/local-lua2cs/shell）
+- **TraeCli 后端**: 直接通过 `traecli exec` 启动独立 AI 会话
+
+**自动后端选择**: source_dir 含 .lua 文件 → local-lua2cs，否则 → traecli
+
+详见: [TASK_TOOL_GUIDE.md](docs/guides/TASK_TOOL_GUIDE.md) | [TRAECLI_ADAPTER_GUIDE.md](docs/guides/TRAECLI_ADAPTER_GUIDE.md)
 
 ## 快速开始
 
@@ -686,14 +724,32 @@ python3 scripts/spec_tools.py update --spec-file SPEC.md
 
 ```
 docs/
-├── project-understanding/  # 项目理解文档
+├── guides/                 # 使用指南
+│   ├── TASK_TOOL_GUIDE.md  # 通用 Task Tool 使用指南 (v2.6)
+│   ├── TRAECLI_ADAPTER_GUIDE.md  # TraeCli 适配器使用指南 (v2.6)
+│   ├── TRAECLI_SETUP_GUIDE.md    # TraeCli 环境部署指南 (v2.6)
+│   ├── CLAUDE_CODE_SUBAGENT_GUIDE.md  # Claude Code SubAgent 指南
+│   ├── CODE_MAP_USAGE.md   # 代码地图使用指南
+│   └── USAGE_GUIDE.md      # 通用使用指南
+├── roles/                  # 角色规则
+│   ├── dispatcher/         # 子智能体调度员 (v2.6)
+│   │   ├── DISPATCHER_RULES.md    # 调度员角色规则
+│   │   └── DISPATCH_TEMPLATE.md   # 调度执行模板
+│   ├── architect/          # 架构师
+│   ├── product-manager/    # 产品经理
+│   ├── solo-coder/         # 独立开发者
+│   ├── test-expert/        # 测试专家
+│   └── ui-designer/        # UI 设计师
 ├── spec/                   # 规范驱动开发文档
-├── architect/              # 架构师文档
-├── product-manager/        # 产品经理文档
-├── tester/                 # 测试专家文档
-├── solo-coder/              # 独立开发者文档
-├── ui-designer/            # UI 设计师文档
-└── devops/                 # DevOps 工程师文档
+└── dev/                    # 开发文档
+
+scripts/                    # 核心脚本
+├── trae_task_tool.py       # 通用 Task Tool 调度器 (v2.6)
+├── trae_agent_worker.py    # 通用 Worker 引擎 (v2.6)
+├── traecli_adapter.py      # TraeCli 适配器 (v2.6)
+├── traecli_setup.py        # TraeCli 自动检测与安装 (v2.6)
+├── dispatch_parallel_agents.py  # 并行分派脚本
+└── workflow_engine_v2.py   # 工作流引擎
 ```
 
 ## 故障排查
@@ -733,5 +789,8 @@ Trae Multi-Agent Dispatcher 提供了：
 - ✅ 完整项目流程
 - ✅ 紧急任务处理
 - ✅ UI 设计（避免 AI slop）
+- ✅ 并行子智能体调度（v2.6: Task Tool + TraeCli）
+- ✅ 可插拔执行后端（v2.6: traecli / local-lua2cs / shell）
+- ✅ 子智能体调度员角色（v2.6: Dispatcher）
 
 通过智能调度，减少用户干预，提升协作效率！
