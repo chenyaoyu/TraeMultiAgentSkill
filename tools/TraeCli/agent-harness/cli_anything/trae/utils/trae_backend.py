@@ -264,19 +264,35 @@ class TraePaths:
     user_data_dir: Path
 
     @property
+    def _app_resources_app_dir(self) -> Path:
+        if os.name == "nt":
+            return self.app_path / "resources" / "app"
+        return self.app_path / "Contents" / "Resources" / "app"
+
+    @property
     def info_plist_path(self) -> Path:
+        if os.name == "nt":
+            return self._app_resources_app_dir / "product.json"
         return self.app_path / "Contents" / "Info.plist"
 
     @property
     def product_json_path(self) -> Path:
-        return self.app_path / "Contents" / "Resources" / "app" / "product.json"
+        return self._app_resources_app_dir / "product.json"
 
     @property
     def electron_main_bundle_path(self) -> Path:
-        return self.app_path / "Contents" / "Resources" / "app" / "out" / "main.js"
+        return self._app_resources_app_dir / "out" / "main.js"
 
     @property
     def cli_script_path(self) -> Path:
+        if os.name == "nt":
+            bin_dir = self.app_path / "bin"
+            candidates = ["trae-cn.cmd", "trae.cmd", "trae-cn", "trae"] if self.app_path.stem == "Trae CN" else ["trae.cmd", "trae-cn.cmd", "trae", "trae-cn"]
+            for name in candidates:
+                candidate = bin_dir / name
+                if candidate.exists():
+                    return candidate
+            return bin_dir / candidates[0]
         bin_dir = self.app_path / "Contents" / "Resources" / "app" / "bin"
         candidates = ["trae-cn", "trae"] if self.app_path.stem == "Trae CN" else ["trae", "trae-cn"]
         for name in candidates:
@@ -339,28 +355,22 @@ class TraePaths:
 
     @property
     def ai_chat_bundle_path(self) -> Path:
-        return (
-            self.app_path
-            / "Contents"
-            / "Resources"
-            / "app"
-            / "node_modules"
-            / "@byted-icube"
-            / "ai-modules-chat"
-            / "dist"
-            / "index.js"
-        )
+        base = self._app_resources_app_dir / "node_modules" / "@byted-icube" / "ai-modules-chat" / "dist"
+        if os.name == "nt":
+            return base / "index.mjs"
+        return base / "index.js"
 
     @property
     def aha_ipc_utils_path(self) -> Path:
+        if os.name == "nt":
+            ipc_module = "ipc-win32-x64"
+        else:
+            ipc_module = "ipc-darwin-arm64"
         return (
-            self.app_path
-            / "Contents"
-            / "Resources"
-            / "app"
+            self._app_resources_app_dir
             / "node_modules"
             / "@aha-kit"
-            / "ipc-darwin-arm64"
+            / ipc_module
             / "dist"
             / "utils.js"
         )
@@ -445,6 +455,17 @@ class TraeBackend:
 
     @staticmethod
     def _default_app_candidates() -> list[Path]:
+        if os.name == "nt":
+            local_app = os.environ.get("LOCALAPPDATA", "")
+            candidates: list[Path] = []
+            if local_app:
+                candidates.append(Path(local_app) / "Programs" / "Trae CN")
+                candidates.append(Path(local_app) / "Programs" / "Trae")
+            candidates.append(Path("C:/Program Files/Trae CN"))
+            candidates.append(Path("C:/Program Files/Trae"))
+            candidates.append(Path("C:/Program Files (x86)/Trae CN"))
+            candidates.append(Path("C:/Program Files (x86)/Trae"))
+            return candidates
         return [
             Path("~/.trae-cn/app-copies/Trae CN-headless.app").expanduser(),
             Path("/Applications/Trae CN.app"),
@@ -466,6 +487,13 @@ class TraeBackend:
             return config_support
         bundle_name = app_path.stem
         support_name = "Trae CN" if bundle_name.startswith("Trae CN") else "Trae"
+        if os.name == "nt":
+            local_app = os.environ.get("LOCALAPPDATA", "")
+            if local_app:
+                return Path(local_app) / support_name
+            app_data = os.environ.get("APPDATA", "")
+            if app_data:
+                return Path(app_data) / support_name
         return (
             Path("~/Library/Application Support").expanduser().resolve() / support_name
         )
@@ -511,7 +539,7 @@ class TraeBackend:
         if not path.exists():
             return {}
         try:
-            return cls._safe_json_object(path.read_text())
+            return cls._safe_json_object(path.read_text(encoding="utf-8"))
         except OSError:
             return {}
 
@@ -528,6 +556,8 @@ class TraeBackend:
         return Path(raw).expanduser().resolve()
 
     def load_info_plist(self) -> dict[str, Any]:
+        if os.name == "nt":
+            return self.load_product_json()
         if not self.paths.info_plist_path.exists():
             return {}
         with self.paths.info_plist_path.open("rb") as handle:
@@ -536,7 +566,7 @@ class TraeBackend:
     def load_product_json(self) -> dict[str, Any]:
         if not self.paths.product_json_path.exists():
             return {}
-        return json.loads(self.paths.product_json_path.read_text())
+        return json.loads(self.paths.product_json_path.read_text(encoding="utf-8"))
 
     @staticmethod
     def _extract_product_command_ids(value: Any) -> list[str]:
@@ -823,6 +853,12 @@ class TraeBackend:
         )
 
     def open_command(self, target: str) -> list[str]:
+        if os.name == "nt":
+            exe_name = self.paths.app_path.stem + ".exe"
+            exe_path = self.paths.app_path / exe_name
+            if "://" in target:
+                return ["cmd", "/c", "start", target]
+            return [str(exe_path), target]
         if "://" in target:
             bundle_id = self.bundle_identifier()
             if bundle_id:
@@ -941,7 +977,7 @@ class TraeBackend:
             raise FileNotFoundError(
                 f"Bridge extension manifest not found: {manifest_path}"
             )
-        return json.loads(manifest_path.read_text())
+        return json.loads(manifest_path.read_text(encoding="utf-8"))
 
     @staticmethod
     def bridge_extension_id_from_manifest(manifest: dict[str, Any]) -> str:
@@ -1068,7 +1104,8 @@ class TraeBackend:
             stage_dir = install_root / f".{install_dir.name}.tmp-{uuid.uuid4().hex}"
             shutil.copytree(source_dir, stage_dir)
             (stage_dir / ".vsixmanifest").write_text(
-                self._render_bridge_vsix_manifest(manifest)
+                self._render_bridge_vsix_manifest(manifest),
+                encoding="utf-8",
             )
             if install_dir.exists():
                 shutil.rmtree(install_dir)
@@ -1085,7 +1122,7 @@ class TraeBackend:
         registry: list[dict[str, Any]] = []
         if registry_path.exists():
             try:
-                loaded = json.loads(registry_path.read_text())
+                loaded = json.loads(registry_path.read_text(encoding="utf-8"))
             except json.JSONDecodeError:
                 loaded = []
             if isinstance(loaded, list):
@@ -1108,7 +1145,7 @@ class TraeBackend:
                 updated=status == "updated",
             )
         )
-        registry_path.write_text(json.dumps(registry, ensure_ascii=False))
+        registry_path.write_text(json.dumps(registry, ensure_ascii=False), encoding="utf-8")
 
         return {
             "status": status,
@@ -1146,7 +1183,7 @@ class TraeBackend:
                 else str(self.paths.user_data_dir),
             }
         )
-        config_path.write_text(json.dumps(current, indent=2, ensure_ascii=False))
+        config_path.write_text(json.dumps(current, indent=2, ensure_ascii=False), encoding="utf-8")
         return {
             "path": str(config_path),
             "config": current,
@@ -1158,7 +1195,8 @@ class TraeBackend:
         if not path.exists():
             return []
         try:
-            payload = self._safe_json_value(path.read_text())
+            raw = self._read_text_with_fallback(path)
+            payload = self._safe_json_value(raw)
         except OSError:
             return []
         if not isinstance(payload, list):
@@ -1168,7 +1206,7 @@ class TraeBackend:
     def write_cli_sessions(self, sessions: list[dict[str, Any]]) -> dict[str, Any]:
         path = self.paths.cli_sessions_path
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(sessions, indent=2, ensure_ascii=False))
+        path.write_text(json.dumps(sessions, indent=2, ensure_ascii=False), encoding="utf-8")
         return {
             "path": str(path),
             "count": len(sessions),
@@ -1223,7 +1261,7 @@ class TraeBackend:
         if not path.exists():
             return self._default_cli_bindings_payload()
         try:
-            payload = self._safe_json_value(path.read_text())
+            payload = self._safe_json_value(path.read_text(encoding="utf-8"))
         except OSError:
             return self._default_cli_bindings_payload()
         if not isinstance(payload, dict):
@@ -1241,7 +1279,7 @@ class TraeBackend:
     def write_cli_bindings(self, payload: dict[str, Any]) -> dict[str, Any]:
         path = self.paths.cli_bindings_path
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
+        path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         return {
             "path": str(path),
             "written": True,
@@ -1990,7 +2028,7 @@ class TraeBackend:
         seen: set[tuple[str, ...]] = set()
         for path in candidates:
             try:
-                payload = self._safe_json_value(path.read_text())
+                payload = self._safe_json_value(path.read_text(encoding="utf-8"))
             except OSError:
                 continue
             if not isinstance(payload, dict):
@@ -2790,7 +2828,7 @@ class TraeBackend:
         registry_path = self.paths.user_extensions_dir / "extensions.json"
         registry_entries: list[dict[str, Any]] = []
         if registry_path.exists():
-            loaded = self._safe_json_value(registry_path.read_text())
+            loaded = self._safe_json_value(registry_path.read_text(encoding="utf-8"))
             if isinstance(loaded, list):
                 for entry in loaded:
                     if (
@@ -2861,7 +2899,7 @@ class TraeBackend:
         probe_dir = self.paths.ai_chat_bundle_path.parent
         probe_path = probe_dir / f".traecli-write-probe-{uuid.uuid4().hex}"
         try:
-            probe_path.write_text("probe")
+            probe_path.write_text("probe", encoding="utf-8")
             probe_path.unlink()
             return {
                 "writable": True,
@@ -3126,7 +3164,7 @@ class TraeBackend:
                 if not backup_path.exists():
                     shutil.copy2(bundle_path, backup_path)
                 legacy_patch_installed = HEADLESS_COMMAND_ID in bundle
-                bundle_path.write_text(self._patch_ai_chat_bundle(bundle))
+                bundle_path.write_text(self._patch_ai_chat_bundle(bundle), encoding="utf-8")
             except OSError as exc:
                 guidance = self._headless_prepare_guidance(
                     writable={
@@ -4882,6 +4920,8 @@ class TraeBackend:
         }
 
     def _detect_remote_debugging_port(self) -> Optional[dict[str, Any]]:
+        if os.name == "nt":
+            return self._detect_remote_debugging_port_windows()
         if not self._command_available("ps"):
             return None
         ps_result = self._run_probe_command(["ps", "-axo", "pid=,ppid=,command="])
@@ -4901,18 +4941,45 @@ class TraeBackend:
             }
         return None
 
+    def _detect_remote_debugging_port_windows(self) -> Optional[dict[str, Any]]:
+        try:
+            result = subprocess.run(
+                ["wmic", "process", "where",
+                 f"name='{self.paths.app_path.stem}.exe'",
+                 "get", "ProcessId,CommandLine",
+                 "/format:list"],
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=5,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            return None
+        for line in result.stdout.splitlines():
+            match = REMOTE_DEBUGGING_PORT_RE.search(line)
+            if not match:
+                continue
+            pid_match = re.search(r"ProcessId=(\d+)", result.stdout)
+            return {
+                "host": "127.0.0.1",
+                "port": int(match.group("port")),
+                "source": "process",
+                "pid": int(pid_match.group(1)) if pid_match else None,
+                "role": "main-electron",
+                "command": line.strip(),
+            }
+        return None
+
     def cdp_target_url_markers(self) -> list[str]:
         app_path = str(self.paths.app_path.resolve())
         app_name = self.paths.app_path.name
         workbench_root = str(
-            (
-                self.paths.app_path
-                / "Contents"
-                / "Resources"
-                / "app"
-                / "out"
-            ).resolve()
+            (self.paths._app_resources_app_dir / "out").resolve()
         )
+        if os.name == "nt":
+            resource_rel = f"{app_name}/resources/app/out/"
+        else:
+            resource_rel = f"{app_name}/Contents/Resources/app/out/"
         candidates = {
             app_path,
             quote(app_path, safe="/"),
@@ -4920,8 +4987,8 @@ class TraeBackend:
             quote(app_name, safe=""),
             workbench_root,
             quote(workbench_root, safe="/"),
-            f"{app_name}/Contents/Resources/app/out/",
-            quote(f"{app_name}/Contents/Resources/app/out/", safe="/"),
+            resource_rel,
+            quote(resource_rel, safe="/"),
         }
         markers = [str(item).strip().lower() for item in candidates if str(item).strip()]
         return sorted(set(markers), key=len, reverse=True)
@@ -5086,6 +5153,10 @@ class TraeBackend:
             return False
 
     def build_cdp_launch_command(self, *, port: int) -> list[str]:
+        if os.name == "nt":
+            exe_name = self.paths.app_path.stem + ".exe"
+            exe_path = self.paths.app_path / exe_name
+            return [str(exe_path), f"--remote-debugging-port={int(port)}"]
         return [
             "open",
             "-na",
@@ -5142,11 +5213,14 @@ class TraeBackend:
             return payload
 
         if not launch_if_needed:
+            if os.name == "nt":
+                launch_hint = f"`{self.paths.app_path / (self.paths.app_path.stem + '.exe')} --remote-debugging-port={resolved_port}`, or pass `--cdp-port`."
+            else:
+                launch_hint = f"`open -na {self.paths.app_path} --args --remote-debugging-port={resolved_port}`, or pass `--cdp-port`."
             raise RuntimeError(
                 "Failed to query the debugger endpoint. Start Trae with remote "
                 "debugging enabled, for example "
-                f"`open -na {self.paths.app_path} --args "
-                f"--remote-debugging-port={resolved_port}`, or pass `--cdp-port`."
+                + launch_hint
             )
 
         launch_result = self.launch_app_for_cdp(port=resolved_port)
@@ -5346,8 +5420,11 @@ class TraeBackend:
             }:
                 message = (
                     f"{message} Start Trae with remote debugging enabled, for example "
-                    f"`open -na {self.paths.app_path} --args --remote-debugging-port="
-                    f"{endpoint['port']}`, or pass `--cdp-port`."
+                    + (
+                        f"`{self.paths.app_path / (self.paths.app_path.stem + '.exe')} --remote-debugging-port={endpoint['port']}`, or pass `--cdp-port`."
+                        if os.name == "nt"
+                        else f"`open -na {self.paths.app_path} --args --remote-debugging-port={endpoint['port']}`, or pass `--cdp-port`."
+                    )
                 )
             raise CDPBridgeError(
                 message or stderr or "Trae CDP bridge failed.",
@@ -5430,7 +5507,7 @@ class TraeBackend:
     def _load_json_file(self, path: Path) -> Optional[dict[str, Any]]:
         if not path.exists():
             return None
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
 
     @staticmethod
     def _ordered_unique(values: list[Any]) -> list[Any]:
@@ -5452,6 +5529,13 @@ class TraeBackend:
         if isinstance(payload, dict):
             return payload
         return None
+
+    @staticmethod
+    def _read_text_with_fallback(path: Path) -> str:
+        try:
+            return path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return path.read_text(encoding="utf-8", errors="replace")
 
     @staticmethod
     def _safe_json_value(raw: str) -> Optional[Any]:
@@ -5625,7 +5709,7 @@ class TraeBackend:
     def load_storage_json(self) -> dict[str, Any]:
         if not self.paths.storage_json_path.exists():
             return {}
-        return json.loads(self.paths.storage_json_path.read_text())
+        return json.loads(self._read_text_with_fallback(self.paths.storage_json_path))
 
     def load_auth_record(self) -> Optional[dict[str, Any]]:
         storage = self.load_storage_json()
@@ -6237,7 +6321,7 @@ class TraeBackend:
             return []
         entries: list[dict[str, Any]] = []
         for path in sorted(self.paths.mcp_gallery_dir.glob("*.json")):
-            payload = json.loads(path.read_text())
+            payload = json.loads(path.read_text(encoding="utf-8"))
             run_commands = payload.get("commands", {}).get("universal", {}).get("run", [])
             entries.append(
                 {
@@ -6257,7 +6341,7 @@ class TraeBackend:
             return []
         entries: list[dict[str, Any]] = []
         for path in sorted(sandbox_dir.glob("*.json"), reverse=True)[:limit]:
-            payload = json.loads(path.read_text())
+            payload = json.loads(path.read_text(encoding="utf-8"))
             permissions = payload.get("permission", [])
             inherited_paths = []
             for item in permissions:
@@ -6277,7 +6361,7 @@ class TraeBackend:
         sandbox_path = self.paths.modular_data_dir / "ai-agent" / "sandbox" / f"{name}.json"
         if not sandbox_path.exists():
             raise FileNotFoundError(f"Sandbox snapshot not found: {name}")
-        return json.loads(sandbox_path.read_text())
+        return json.loads(sandbox_path.read_text(encoding="utf-8"))
 
     def list_log_files(self) -> list[str]:
         latest = self.latest_log_session_dir()
